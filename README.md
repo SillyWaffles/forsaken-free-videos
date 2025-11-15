@@ -192,7 +192,7 @@ Use this path if your skin already has custom logic.
 
     -- <<< 1. ADD THESE MODULES >>>
     local VideoPlayer = require(l_ReplicatedStorage_0.Modules.VideoPlayer)
-    local VideoTemplate = l_ReplicatedStorage_0.Assets.VideoTemplateUI -- The ScreenGui template
+    local VideoTemplate = script.ScreenGui -- Hey! Waffles here! There a little error on the tutorial, so this line its modified, just paste it like it is! Gemini ignored the fact that the ScreenGui its inside the Behavior script. YES I USED AI TO MAKE THE TUTORIAL WHAT ARE YOU GONNA DO ABOUT IT
 
     -- This table holds your skin's unique functions
     local v25 = {
