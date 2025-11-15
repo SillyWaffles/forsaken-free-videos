@@ -1,2 +1,388 @@
-# forsaken-free-videos
-This tutorial will guide you through adding a high-performance, free video intro (or outro) to any skin in Forsaken. This system replaces Roblox's deprecated VideoFrame by using a "sprite sheet" method, which converts your video into a series of images. This costs 0 Robux and includes perfectly synced audio.
+# Tutorial: How to Add Custom Sprite Sheet Videos to Forsaken
+
+This tutorial will guide you through adding a high-performance, free video intro (or outro) to any skin in Forsaken. This system replaces Roblox's deprecated `VideoFrame` by using a "sprite sheet" method, which converts your video into a series of images. This costs 0 Robux and includes perfectly synced audio.
+
+### What You'll Need
+
+From this repository, you will need:
+
+  * **`ffmpeg.exe`**: A command-line tool for converting video and audio.
+  * **`spritesheets.py`**: The Python script that packs video frames into a sprite sheet.
+  * **`VideoPlayer.rbxm`**: A Roblox asset file containing:
+    1.  The core `VideoPlayer` ModuleScript.
+    2.  A pre-made `ScreenGui` template (`VideoTemplateUI`).
+
+You will also need:
+
+  * **Python 3.x** installed on your computer.
+  * **Pillow Library**: The Python script requires this. Install it by opening a terminal (CMD) and typing: `pip install Pillow`.
+  * **Your Video File**: The intro/outro video (e.g., `my_intro.webm` or `.mp4`).
+  * **Your Audio File**: The audio track for your video (e.g., `my_intro.mp3`).
+
+-----
+
+### Part 1: Generate Your Assets (On Your PC)
+
+In this step, we'll use `ffmpeg` and Python to convert your video into the `.png` sprite sheet and `.lua` data file that Roblox needs.
+
+1.  **Create Your Workspace:**
+
+      * Create a new folder on your PC (e.g., `C:\ForsakenVideos`).
+      * Place `ffmpeg.exe` and `spritesheets.py` inside this folder.
+      * Place your video file here (e.g., `my_skin_intro.webm`).
+
+2.  **Open Your Terminal (CMD):**
+
+      * Press the Windows Key, type `cmd`, and hit Enter.
+      * Navigate to your new folder by typing:
+        ```bash
+        cd C:\ForsakenVideos
+        ```
+
+3.  **Create a Frame Folder:**
+
+      * This empty folder will store the thousands of images we're about to extract.
+      * Type `mkdir my_skin_frames` and press Enter.
+
+4.  **Extract Audio (If you don't have it separately):**
+
+      * Use this command to rip the audio from your video file:
+        ```bash
+        ffmpeg -i my_skin_intro.webm -q:a 0 -map a my_skin_audio.mp3
+        ```
+
+5.  **Extract Video Frames (The Key Step):**
+
+      * This command converts your video into hundreds of small `.png` frames. We use a resolution of **`512x288`** because it provides a great balance of quality and performance, resulting in a manageable number of sprite sheets.
+      * Run this command (this is one long line):
+        ```bash
+        ffmpeg -i my_skin_intro.webm -r 30 -s 512x288 "C:\ForsakenVideos\my_skin_frames\frame_%04d.png"
+        ```
+      * Your `my_skin_frames` folder is now filled with images.
+
+6.  **Generate the Sprite Sheet and Lua Data:**
+
+      * Run the `spritesheets.py` script on the folder you just created:
+        ```bash
+        python spritesheets.py "C:\ForsakenVideos\my_skin_frames"
+        ```
+      * The script will process all the frames and pack them.
+
+**You're done\!** Your `my_skin_frames` folder now contains:
+
+  * `sheet_0.png`, `sheet_1.png`... (a "stack" of sprite sheet images).
+  * `my_skin_frames.lua` (your video data file).
+
+-----
+
+### Part 2: Import and Configure in Roblox Studio
+
+Now we move to Roblox Studio to import everything.
+
+1.  **Upload Your Assets:**
+
+      * Go to the Creator Dashboard and upload your audio file (`my_skin_audio.mp3`). **Copy its Asset ID.**
+      * Go to the `my_skin_frames` folder. Upload **ALL** of the `sheet_X.png` images. **Copy all their Asset IDs in the correct order** (sheet\_0, sheet\_1, etc.).
+
+2.  **Install the Core Scripts:**
+
+      * Drag the **`VideoPlayer.rbxm`** file from this repository into `ReplicatedStorage`.
+      * This will automatically create two items:
+        1.  `ReplicatedStorage.Modules.VideoPlayer` (The "engine").
+        2.  `ReplicatedStorage.Assets.VideoTemplateUI` (The `ScreenGui` template).
+      * *Note: If you place these items elsewhere, you must update the paths in the `Behavior.lua` script later.*
+
+3.  **Create the Video Data Module:**
+
+      * In `ReplicatedStorage.Assets`, create a `Folder` named `Videos`.
+      * Inside `Videos`, create a new `ModuleScript`. Name it based on your skin (e.g., `MySkinIntroData`).
+      * Open the `my_skin_frames.lua` file (from Part 1) on your computer. Copy all the text.
+      * Paste that text into your `MySkinIntroData` ModuleScript in Roblox.
+      * **CRITICAL STEP:** You must now fill in the `AudioID` and `Images` table with the Asset IDs you just uploaded.
+
+    **Example: `ReplicatedStorage.Assets.Videos.MySkinIntroData`**
+
+    ```lua
+    return {
+    	-- VVV ADD THIS LINE VVV
+    	["AudioID"] = "rbxassetid://123456789", -- (Your my_skin_audio.mp3 ID)
+
+    	["TotalFrames"] = 117, -- (This number is generated by Python)
+    	["FPS"] = 30,
+    	["Resolution"] = {
+    		["Width"] = 512,
+    		["Height"] = 288
+    	},
+    	-- ...
+    	
+    	-- VVV FILL IN THIS TABLE (in order!) VVV
+    	["Images"] = {
+    		"rbxassetid://9876543210", -- (sheet_0.png ID)
+    		"rbxassetid://9876543211", -- (sheet_1.png ID)
+    		"rbxassetid://9876543212", -- (sheet_2.png ID)
+            -- ...and so on for all your sheet images
+    	},
+    	["FrameData"] = {
+    		[1] = {["ImageIndex"] = 1,["Offset"] = {["X"] = 0,["Y"] = 0},["Size"] = {["X"] = 512,["Y"] = 288}},
+    		[2] = {["ImageIndex"] = 1,["Offset"] = {["X"] = 512,["Y"] = 0},["Size"] = {["X"] = 512,["Y"] = 288}},
+    		-- ... (This giant table was generated by Python)
+    	}
+    }
+    ```
+
+-----
+
+### Part 3: Hook Into Your Skin's Logic
+
+This is the final step. You need to tell your skin's `Config` and `Behavior` scripts to use this video.
+
+#### Step 3A: Modify the `Config.lua`
+
+Every skin has a `Config.lua`.
+
+1.  Find your skin's `Config` script (e.g., `ServerStorage.Assets.Skins.Slasher.Vanity.Config`).
+
+2.  Add (or modify) the `Videos` table to point to your new Data Module. You also *must* add a `ForcedIntroTime` to match your video's length (in seconds).
+
+    **Example: Your Skin's `Config.lua`**
+
+    ```lua
+    return {
+    	DisplayName = "My Skin",
+        -- ... (Price, Description, etc.)
+        
+        -- VVV ADD/MODIFY THESE VVV
+    	ForcedIntroTime = 4, -- (e.g., 4 seconds)
+    	ForcedOutroTime = 2.5, -- (If you have an outro)
+        
+        -- ... (Sounds, etc.)
+
+    	Videos = {
+    		-- Add these new lines to point to your data modules
+    		IntroData = game.ReplicatedStorage.Assets.Videos.MySkinIntroData,
+    		OutroData = game.ReplicatedStorage.Assets.Videos.MySkinOutroData -- (If you made one)
+    	}
+    };
+    ```
+
+#### Step 3B: Create or Modify the `Behavior.lua`
+
+You now have two paths. **Choose the one that applies to your skin.**
+
+-----
+
+##### **Path 1: My skin *already has* a `Behavior.lua` script (like Vanity).**
+
+Use this path if your skin already has custom logic.
+
+1.  Open your skin's existing `Behavior.lua` script (e.g., `ServerStorage.Assets.Skins.Slasher.Vanity.Behavior`).
+
+2.  Add the `VideoPlayer` and `VideoTemplateUI` modules to the top of the script.
+
+3.  Add (or replace) the `v30` (`createVideoUI`) function with our new one.
+
+4.  Add (or replace) the `v25.OnIntroduction` and `v25.OnVictory` functions.
+
+    **Example: Your *modified* `Behavior.lua`**
+
+    ```lua
+    -- ... (Any existing 'require' lines)
+    local l_ReplicatedStorage_0 = game:GetService("ReplicatedStorage");
+    local l_TweenService_0 = game:GetService("TweenService");
+
+    -- <<< 1. ADD THESE MODULES >>>
+    local VideoPlayer = require(l_ReplicatedStorage_0.Modules.VideoPlayer)
+    local VideoTemplate = l_ReplicatedStorage_0.Assets.VideoTemplateUI -- The ScreenGui template
+
+    -- This table holds your skin's unique functions
+    local v25 = {
+    	-- ... (Your skin's other functions like EnragedReveal, EnragedEnd) ...
+    };
+
+    -- <<< 2. ADD/REPLACE THIS FUNCTION >>>
+    -- This function creates the video player
+    local function v30(videoDataModule, options)
+    	local v28 = VideoTemplate:Clone(); -- Clones the GUI template
+    	v28.Name = "IntroVideoUI";
+    	v28.Parent = game.Players.LocalPlayer.PlayerGui;
+
+    	local l_ImageLabel_0 = v28:FindFirstChild("VideoFrame")
+    	
+    	if not l_ImageLabel_0 then
+    		warn("Video GUI is broken: 'ImageLabel' named 'VideoFrame' not found in template!")
+    		v28:Destroy();
+    		return nil, nil
+    	end
+
+    	local videoData = require(videoDataModule)
+    	local videoPlayerInstance = VideoPlayer.new(l_ImageLabel_0, videoData)
+
+    	if options then
+    		if options.DestroyOnEnd then
+    			videoPlayerInstance.Finished.Event:Connect(function()
+    				v28:Destroy();
+    				videoPlayerInstance:destroy();
+    			end);
+    		end;
+    	end;
+    	
+    	videoPlayerInstance:play();
+    	return v28, videoPlayerInstance;
+    end;
+    -- <<< END FUNCTION >>>
+
+    v25.CreatedPost = function(_, v32)
+    	-- ... (This function remains the same, if it exists) ...
+    end;
+
+    -- <<< 3. ADD/REPLACE THESE FUNCTIONS >>>
+    v25.OnIntroduction = function(_, v42, _, v44) -- v42 is character, v44 is ForcedIntroTime
+    	task.spawn(function()
+    		local introDataModule = v42.Config.Videos.IntroData
+    		if not introDataModule then return end -- No video for this skin
+    		
+    		local v45_gui, v45_player = v30(introDataModule, { DestroyOnEnd = true });
+    		
+    		if v45_gui then
+    			game.Debris:AddItem(v45_gui, v44); -- v44 is ForcedIntroTime
+    		end
+    	end);
+    end;
+
+    v25.OnVictory = function(_, v47, v48, _, _) -- v47 is state ("Start"/"End"), v48 is character
+    	if v47 == "Start" then
+    		local outroDataModule = v48.Config.Videos.OutroData
+    		if not outroDataModule then return end -- No outro video
+    		
+    		local gui, player = v30(outroDataModule, { Looped = false });
+    		v25.currentOutroPlayer = player -- Save player to stop it later
+    		
+    	elseif v47 == "End" then
+    		local l_IntroVideoUI_0 = game.Players.LocalPlayer.PlayerGui:FindFirstChild("IntroVideoUI");
+    		if l_IntroVideoUI_0 then
+    			l_IntroVideoUI_0:Destroy();
+    		end
+    		if v25.currentOutroPlayer then
+    			v25.currentOutroPlayer:destroy()
+    			v25.currentOutroPlayer = nil
+    		end
+    	end;
+    end;
+    -- <<< END STEP 3 >>>
+
+    return v25;
+    ```
+
+-----
+
+##### **Path 2: My skin *does not have* a `Behavior.lua` script.**
+
+Use this path if your skin only has a `Config.lua`.
+
+1.  Right-click on your skin's `Config.lua` script.
+
+2.  Select `Insert Object` \> `ModuleScript`.
+
+3.  **Rename** this new `ModuleScript` to `Behavior`.
+
+4.  **Paste** the minimal code below. This code *only* handles playing the video intro/outro.
+
+    **Script: `Behavior.lua` (Minimal Template)**
+
+    ```lua
+    -- This is a minimal Behavior script for skins that only need a video intro.
+    local l_ReplicatedStorage_0 = game:GetService("ReplicatedStorage");
+
+    -- --- Define Modules ---
+    local VideoPlayer = require(l_ReplicatedStorage_0.Modules.VideoPlayer)
+    local VideoTemplate = l_ReplicatedStorage_0.Assets.VideoTemplateUI -- The ScreenGui template
+
+    -- This table will hold our functions
+    local v25 = {}
+
+    -- --- Video Player Function ---
+    -- This function creates the video player
+    local function v30(videoDataModule, options)
+    	local v28 = VideoTemplate:Clone(); -- Clones the GUI template
+    	v28.Name = "IntroVideoUI";
+    	v28.Parent = game.Players.LocalPlayer.PlayerGui;
+
+    	local l_ImageLabel_0 = v28:FindFirstChild("VideoFrame")
+    	
+    	if not l_ImageLabel_0 then
+    		warn("Video GUI is broken: 'ImageLabel' named 'VideoFrame' not found in template!")
+    		v28:Destroy();
+    		return nil, nil
+    	end
+
+    	local videoData = require(videoDataModule)
+    	local videoPlayerInstance = VideoPlayer.new(l_ImageLabel_0, videoData)
+
+    	if options then
+    		if options.DestroyOnEnd then
+    			videoPlayerInstance.Finished.Event:Connect(function()
+    				v28:Destroy();
+    				videoPlayerInstance:destroy();
+    			end);
+    		end;
+    	end;
+    	
+    	videoPlayerInstance:play();
+    	return v28, videoPlayerInstance;
+    end;
+
+    -- --- Event Handlers ---
+    v25.OnIntroduction = function(_, v42, _, v44) -- v42 is character, v44 is ForcedIntroTime
+    	task.spawn(function()
+    		local introDataModule = v42.Config.Videos.IntroData
+    		if not introDataModule then return end -- No video for this skin
+    		
+    		local v45_gui, v45_player = v30(introDataModule, { DestroyOnEnd = true });
+    		
+    		if v45_gui then
+    			game.Debris:AddItem(v45_gui, v44); -- v44 is ForcedIntroTime
+    		end
+    	end);
+    end;
+
+    v25.OnVictory = function(_, v47, v48, _, _) -- v47 is state ("Start"/"End"), v48 is character
+    	if v47 == "Start" then
+    		local outroDataModule = v48.Config.Videos.OutroData
+    		if not outroDataModule then return end -- No outro video
+    		
+    		local gui, player = v30(outroDataModule, { Looped = false });
+    		v25.currentOutroPlayer = player -- Save player to stop it later
+    		
+    	elseif v47 == "End" then
+    		local l_IntroVideoUI_0 = game.Players.LocalPlayer.PlayerGui:FindFirstChild("IntroVideoUI");
+    		if l_IntroVideoUI_0 then
+    			l_IntroVideoUI_0:Destroy();
+    		end
+    		if v25.currentOutroPlayer then
+    			v25.currentOutroPlayer:destroy()
+    			v25.currentOutroPlayer = nil
+    		end
+    	end;
+    end;
+
+    return v25
+    ```
+
+-----
+
+### Part 4: Final Test
+
+You're done\! The `VideoPlayer.rbxm` file already contains the correct `ScreenGui` template, so you don't need to build it.
+
+Launch your game and test the skin. Your intro and outro should now play perfectly, with synced audio.
+
+#### **Troubleshooting**
+
+  * **Error: `ImageLabel' named 'VideoFrame' not found!`**
+      * The `VideoTemplateUI` from the `.rbxm` file is missing or you renamed the `ImageLabel` inside it.
+  * **Error: `Config.lua... is missing 'Videos.IntroData'`**
+      * You missed Part 3A. You must update your `Config.lua` to point to the new Data Module.
+  * **Error: `Infinite yield possible on 'ReplicatedStorage.Modules.VideoPlayer'`**
+      * You missed Part 2, Step 2, or you didn't place the `.rbxm` in `ReplicatedStorage`.
+  * **Error: `'AudioID' is not a valid member of ModuleScript`**
+      * You missed Part 2, Step 4. You must manually add the `["AudioID"] = "rbxassetid://..."` line to your `MySkinIntroData` script.
