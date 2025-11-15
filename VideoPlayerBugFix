@@ -1,30 +1,30 @@
--- Module "VideoPlayer" v1.8 (Triple Buffer Rotation Anti-Flicker Solution)
+-- Module "VideoPlayer" v2.0 (Triple Buffer + Flicker Shield)
 -- Location: ReplicatedStorage.Modules.VideoPlayer
+-- This version uses the v1.8 triple-buffer system for high-speed playback,
+-- PLUS a 4th "Flicker Shield" buffer in the back that updates slower,
+-- as requested, to catch any black flickers.
 
 local RunService = game:GetService("RunService")
 local Video = {}
 Video.__index = Video
 
 -- --- Helper Function: Load Frame ---
--- Loads frame data into an ImageLabel
 local function LoadFrameData(buffer, videoData, frameIndex)
-	-- Don't load invalid frames (like -1 or last+1)
 	if frameIndex < 1 or frameIndex > videoData.TotalFrames then
-		-- If the frame is invalid, just hide the buffer
 		buffer.Image = ""
 		return
 	end
-
+	
 	local frameInfo = videoData.FrameData[frameIndex]
-	if not frameInfo then return end -- Frame doesn't exist
+	if not frameInfo then return end 
 
 	local imageIndex = frameInfo.ImageIndex
 	local newImage = videoData.Images[imageIndex]
-
+	
 	if buffer.Image ~= newImage then
 		buffer.Image = newImage
 	end
-
+	
 	buffer.ImageRectOffset = Vector2.new(frameInfo.Offset.X, frameInfo.Offset.Y)
 	buffer.ImageRectSize = Vector2.new(frameInfo.Size.X, frameInfo.Size.Y)
 end
@@ -33,142 +33,147 @@ end
 -- Constructor
 function Video.new(imageLabel, videoData)
 	local self = setmetatable({}, Video)
-
-	-- --- Triple Buffer Setup ---
-	-- Buffer A (Front)
+	
+	-- --- Triple Buffer Setup (Fast) ---
 	self.BufferA = imageLabel
 	self.BufferA.Name = "VideoFrame_BufferA"
-	self.BufferA.ZIndex = 3
+	self.BufferA.ZIndex = 3 -- Front
 	self.BufferA.Visible = false
-
-	-- Buffer B (Middle)
+	
 	self.BufferB = self.BufferA:Clone()
 	self.BufferB.Name = "VideoFrame_BufferB"
-	self.BufferB.ZIndex = 2
+	self.BufferB.ZIndex = 2 -- Middle
 	self.BufferB.Visible = false
 	self.BufferB.Parent = self.BufferA.Parent
-
-	-- Buffer C (Back/Persistent)
+	
 	self.BufferC = self.BufferA:Clone()
 	self.BufferC.Name = "VideoFrame_BufferC"
-	self.BufferC.ZIndex = 1
+	self.BufferC.ZIndex = 1 -- Back
 	self.BufferC.Visible = false
 	self.BufferC.Parent = self.BufferA.Parent
-
-	-- Assign roles
-	self.FrontBuffer = self.BufferA
-	self.MidBuffer = self.BufferB
-	self.BackBuffer = self.BufferC
+	
+	-- --- Flicker Shield Setup (Slow) ---
+	-- This is the 4th buffer (your idea)
+	self.FlickerShield = self.BufferA:Clone()
+	self.FlickerShield.Name = "VideoFrame_FlickerShield"
+	self.FlickerShield.ZIndex = 0 -- Very back
+	self.FlickerShield.Visible = false
+	self.FlickerShield.Parent = self.BufferA.Parent
 	-- ---------------------------------
-
+	
 	self.VideoData = videoData
 	self.StartTime = 0
 	self.Connection = nil
 	self.IsPlaying = false
 	self.CurrentFrameIndex = 0
-
+	
 	self.Finished = Instance.new("BindableEvent") 
 	self.Sound = Instance.new("Sound")
 	self.Sound.SoundId = videoData.AudioID
 	self.Sound.Parent = self.FrontBuffer
-
+	
 	-- --- Preloading ---
-	LoadFrameData(self.FrontBuffer, videoData, 1) -- Frame 1 (Front)
-	LoadFrameData(self.MidBuffer, videoData, 2)   -- Frame 2 (Middle)
-	LoadFrameData(self.BackBuffer, videoData, 0)   -- Frame 0 (Empty) (Back)
+	LoadFrameData(self.BufferA, videoData, 1) -- Frame 1 (Front)
+	LoadFrameData(self.BufferB, videoData, 2) -- Frame 2 (Middle)
+	LoadFrameData(self.BufferC, videoData, 0) -- Frame 0 (Back)
+	LoadFrameData(self.FlickerShield, videoData, 1) -- Frame 1 (Shield)
 	-- ----------------
-
+	
 	return self
 end
 
--- Play Function (WITH AUDIO) [v1.8]
+-- Play Function (WITH AUDIO) [v2.0]
 function Video:play()
 	if self.IsPlaying then return end
-
+	
 	self.IsPlaying = true
 	self.StartTime = os.clock()
-
+	
 	-- Make all buffers visible
-	self.FrontBuffer.Visible = true
-	self.MidBuffer.Visible = true
-	self.BackBuffer.Visible = true
+	self.BufferA.Visible = true
+	self.BufferB.Visible = true
+	self.BufferC.Visible = true
+	self.FlickerShield.Visible = true
 	self.CurrentFrameIndex = 1
-
+	
 	self.Sound:Play() 
 
+	-- --- Main Render Loop (Fast) ---
 	self.Connection = RunService.RenderStepped:Connect(function()
 		local elapsedTime = os.clock() - self.StartTime
 		local frameIndex = math.floor(elapsedTime * self.VideoData.FPS) + 1
 
-		-- 1. If the frame is the same as the previous one, do NOTHING.
-		if frameIndex == self.CurrentFrameIndex then
-			return
-		end
-
-		-- 2. If the video finished
+		if frameIndex == self.CurrentFrameIndex then return end
 		if frameIndex > self.VideoData.TotalFrames then
 			self:stop()
 			return
 		end
 
-		-- 3. It's a new, valid frame. Update.
 		self.CurrentFrameIndex = frameIndex 
-
-		-- --- Triple Buffer Rotation Magic ---
-
-		-- A. Rotate ZIndexes
-		self.FrontBuffer.ZIndex = 1 -- The one that was in front (N-1) moves to the back
-		self.MidBuffer.ZIndex = 3   -- The one in the middle (N) moves to the front
-		self.BackBuffer.ZIndex = 2  -- The one in the back (N-2) moves to the middle
-
-		-- B. Rotate References
-		local temp = self.FrontBuffer
-		self.FrontBuffer = self.MidBuffer
-		self.MidBuffer = self.BackBuffer
-		self.BackBuffer = temp
-
-		-- C. Preload the *next* frame onto the buffer that just moved to the MIDDLE
-		-- (It's now the MidBuffer, with ZIndex 2)
+		
+		-- Triple Buffer Rotation (v1.8 logic)
+		self.BufferA.ZIndex = 1
+		self.BufferB.ZIndex = 3
+		self.BufferC.ZIndex = 2
+		
+		local temp = self.BufferA
+		self.BufferA = self.BufferB
+		self.BufferB = self.BufferC
+		self.BufferC = temp
+		
 		local nextFrameIndex = frameIndex + 1
-		LoadFrameData(self.MidBuffer, self.VideoData, nextFrameIndex)
-
-		-- D. The BackBuffer (ZIndex 1) already has frame N-1,
-		-- which is the "persistent frame" you wanted.
-		-- ----------------------------------------
+		LoadFrameData(self.BufferB, self.VideoData, nextFrameIndex)
+	end)
+	
+	-- --- Flicker Shield Loop (Slow) ---
+	-- This runs your 0.1s backup buffer idea
+	task.spawn(function()
+		while self.IsPlaying do
+			-- Update the backup frame
+			LoadFrameData(self.FlickerShield, self.VideoData, self.CurrentFrameIndex)
+			
+			-- Wait 0.1 seconds
+			task.wait(0.1)
+		end
 	end)
 end
 
 -- Stop Function (WITH AUDIO)
 function Video:stop()
-	if not self.IsPlaying then return end
-
-	self.IsPlaying = false
+	if self.IsPlaying == false then return end -- Prevent double-stop
+	
+	self.IsPlaying = false -- This stops the Flicker Shield loop
+	
 	if self.Connection then
-		self.Connection:Disconnect()
+		self.Connection:Disconnect() -- This stops the RenderStepped loop
 		self.Connection = nil
 	end
-
+	
 	self.Sound:Stop()
-
+	
 	-- Hide all buffers
-	self.FrontBuffer.Visible = false 
-	self.MidBuffer.Visible = false
-	self.BackBuffer.Visible = false
-
+	self.BufferA.Visible = false 
+	self.BufferB.Visible = false
+	self.BufferC.Visible = false
+	self.FlickerShield.Visible = false
+	
 	self.Finished:Fire()
 end
 
--- Destroy (Cleans up the cloned buffers)
+-- Destroy (Cleans up all cloned buffers)
 function Video:destroy()
 	self:stop()
 	self.Sound:Destroy()
 	self.Finished:Destroy()
-
-	if self.MidBuffer then
-		self.MidBuffer:Destroy()
+	
+	if self.BufferB then
+		self.BufferB:Destroy()
 	end
-	if self.BackBuffer then
-		self.BackBuffer:Destroy()
+	if self.BufferC then
+		self.BufferC:Destroy()
+	end
+	if self.FlickerShield then
+		self.FlickerShield:Destroy()
 	end
 end
 
