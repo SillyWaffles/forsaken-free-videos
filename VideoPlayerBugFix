@@ -1,0 +1,175 @@
+-- Module "VideoPlayer" v1.8 (Triple Buffer Rotation Anti-Flicker Solution)
+-- Location: ReplicatedStorage.Modules.VideoPlayer
+
+local RunService = game:GetService("RunService")
+local Video = {}
+Video.__index = Video
+
+-- --- Helper Function: Load Frame ---
+-- Loads frame data into an ImageLabel
+local function LoadFrameData(buffer, videoData, frameIndex)
+	-- Don't load invalid frames (like -1 or last+1)
+	if frameIndex < 1 or frameIndex > videoData.TotalFrames then
+		-- If the frame is invalid, just hide the buffer
+		buffer.Image = ""
+		return
+	end
+
+	local frameInfo = videoData.FrameData[frameIndex]
+	if not frameInfo then return end -- Frame doesn't exist
+
+	local imageIndex = frameInfo.ImageIndex
+	local newImage = videoData.Images[imageIndex]
+
+	if buffer.Image ~= newImage then
+		buffer.Image = newImage
+	end
+
+	buffer.ImageRectOffset = Vector2.new(frameInfo.Offset.X, frameInfo.Offset.Y)
+	buffer.ImageRectSize = Vector2.new(frameInfo.Size.X, frameInfo.Size.Y)
+end
+-- ------------------------------------
+
+-- Constructor
+function Video.new(imageLabel, videoData)
+	local self = setmetatable({}, Video)
+
+	-- --- Triple Buffer Setup ---
+	-- Buffer A (Front)
+	self.BufferA = imageLabel
+	self.BufferA.Name = "VideoFrame_BufferA"
+	self.BufferA.ZIndex = 3
+	self.BufferA.Visible = false
+
+	-- Buffer B (Middle)
+	self.BufferB = self.BufferA:Clone()
+	self.BufferB.Name = "VideoFrame_BufferB"
+	self.BufferB.ZIndex = 2
+	self.BufferB.Visible = false
+	self.BufferB.Parent = self.BufferA.Parent
+
+	-- Buffer C (Back/Persistent)
+	self.BufferC = self.BufferA:Clone()
+	self.BufferC.Name = "VideoFrame_BufferC"
+	self.BufferC.ZIndex = 1
+	self.BufferC.Visible = false
+	self.BufferC.Parent = self.BufferA.Parent
+
+	-- Assign roles
+	self.FrontBuffer = self.BufferA
+	self.MidBuffer = self.BufferB
+	self.BackBuffer = self.BufferC
+	-- ---------------------------------
+
+	self.VideoData = videoData
+	self.StartTime = 0
+	self.Connection = nil
+	self.IsPlaying = false
+	self.CurrentFrameIndex = 0
+
+	self.Finished = Instance.new("BindableEvent") 
+	self.Sound = Instance.new("Sound")
+	self.Sound.SoundId = videoData.AudioID
+	self.Sound.Parent = self.FrontBuffer
+
+	-- --- Preloading ---
+	LoadFrameData(self.FrontBuffer, videoData, 1) -- Frame 1 (Front)
+	LoadFrameData(self.MidBuffer, videoData, 2)   -- Frame 2 (Middle)
+	LoadFrameData(self.BackBuffer, videoData, 0)   -- Frame 0 (Empty) (Back)
+	-- ----------------
+
+	return self
+end
+
+-- Play Function (WITH AUDIO) [v1.8]
+function Video:play()
+	if self.IsPlaying then return end
+
+	self.IsPlaying = true
+	self.StartTime = os.clock()
+
+	-- Make all buffers visible
+	self.FrontBuffer.Visible = true
+	self.MidBuffer.Visible = true
+	self.BackBuffer.Visible = true
+	self.CurrentFrameIndex = 1
+
+	self.Sound:Play() 
+
+	self.Connection = RunService.RenderStepped:Connect(function()
+		local elapsedTime = os.clock() - self.StartTime
+		local frameIndex = math.floor(elapsedTime * self.VideoData.FPS) + 1
+
+		-- 1. If the frame is the same as the previous one, do NOTHING.
+		if frameIndex == self.CurrentFrameIndex then
+			return
+		end
+
+		-- 2. If the video finished
+		if frameIndex > self.VideoData.TotalFrames then
+			self:stop()
+			return
+		end
+
+		-- 3. It's a new, valid frame. Update.
+		self.CurrentFrameIndex = frameIndex 
+
+		-- --- Triple Buffer Rotation Magic ---
+
+		-- A. Rotate ZIndexes
+		self.FrontBuffer.ZIndex = 1 -- The one that was in front (N-1) moves to the back
+		self.MidBuffer.ZIndex = 3   -- The one in the middle (N) moves to the front
+		self.BackBuffer.ZIndex = 2  -- The one in the back (N-2) moves to the middle
+
+		-- B. Rotate References
+		local temp = self.FrontBuffer
+		self.FrontBuffer = self.MidBuffer
+		self.MidBuffer = self.BackBuffer
+		self.BackBuffer = temp
+
+		-- C. Preload the *next* frame onto the buffer that just moved to the MIDDLE
+		-- (It's now the MidBuffer, with ZIndex 2)
+		local nextFrameIndex = frameIndex + 1
+		LoadFrameData(self.MidBuffer, self.VideoData, nextFrameIndex)
+
+		-- D. The BackBuffer (ZIndex 1) already has frame N-1,
+		-- which is the "persistent frame" you wanted.
+		-- ----------------------------------------
+	end)
+end
+
+-- Stop Function (WITH AUDIO)
+function Video:stop()
+	if not self.IsPlaying then return end
+
+	self.IsPlaying = false
+	if self.Connection then
+		self.Connection:Disconnect()
+		self.Connection = nil
+	end
+
+	self.Sound:Stop()
+
+	-- Hide all buffers
+	self.FrontBuffer.Visible = false 
+	self.MidBuffer.Visible = false
+	self.BackBuffer.Visible = false
+
+	self.Finished:Fire()
+end
+
+-- Destroy (Cleans up the cloned buffers)
+function Video:destroy()
+	self:stop()
+	self.Sound:Destroy()
+	self.Finished:Destroy()
+
+	if self.MidBuffer then
+		self.MidBuffer:Destroy()
+	end
+	if self.BackBuffer then
+		self.BackBuffer:Destroy()
+	end
+end
+
+return Video
